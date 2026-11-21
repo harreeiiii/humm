@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Hum</title>
+<style>
+:root{--bg:#fff;--bg2:#f2f2f7;--ink:#000;--mute:#8a8a8e;--line:#e5e5ea;--acc:#fa2d48;--glass:rgba(255,255,255,.82)}
+@media(prefers-color-scheme:dark){:root{--bg:#000;--bg2:#1c1c1e;--ink:#fff;--line:#2c2c2e;--glass:rgba(28,28,30,.85)}}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-serif;padding-top:env(safe-area-inset-top)}
+#app{max-width:680px;margin:0 auto;padding:0 16px 190px}
+h1{font-size:2rem;font-weight:800;margin:18px 0 12px;letter-spacing:-.02em}
+h2{font-size:1.2rem;margin:22px 0 10px}
+.hs{display:flex;gap:14px;overflow-x:auto;padding-bottom:6px}
+.card{flex:none;width:160px}.card .cv{width:160px;height:160px}
+.cv{border-radius:10px;background-size:cover;background-position:center;aspect-ratio:1}
+.card b,.card span{display:block;font-size:.85rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:6px}
+.card span,.sub{color:var(--mute)}
+.row{display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--line)}
+.row .cv{width:50px;flex:none}.row .m{flex:1;min-width:0}.row .m b{display:block;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row.on b{color:var(--acc)}
+.ib{background:none;border:0;color:var(--acc);font-size:1.25rem;padding:6px;cursor:pointer}
+input,button.btn{font:inherit;width:100%;padding:13px;border-radius:12px;border:1px solid var(--line);background:var(--bg2);color:var(--ink);margin-bottom:10px}
+button.btn{background:var(--acc);color:#fff;border:0;font-weight:600;cursor:pointer}
+button.btn.alt{background:var(--bg2);color:var(--acc)}
+.tabs{position:fixed;left:0;right:0;bottom:0;display:flex;background:var(--glass);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom);z-index:5}
+.tabs button{flex:1;background:none;border:0;color:var(--mute);padding:10px 0 8px;font-size:.68rem;cursor:pointer}
+.tabs button i{display:block;font-style:normal;font-size:1.3rem}.tabs button.on{color:var(--acc)}
+#mini{position:fixed;left:8px;right:8px;bottom:calc(58px + env(safe-area-inset-bottom));max-width:664px;margin:0 auto;background:var(--glass);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-radius:14px;padding:8px;display:none;align-items:center;gap:10px;z-index:4;box-shadow:0 2px 12px rgba(0,0,0,.15)}
+#mini .cv{width:42px}#mini .m{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#np{position:fixed;inset:0;background:var(--bg);z-index:10;display:none;flex-direction:column;align-items:center;padding:calc(16px + env(safe-area-inset-top)) 28px calc(24px + env(safe-area-inset-bottom));overflow:auto}
+#np .big{width:min(100%,380px);margin:18px 0;box-shadow:0 12px 40px rgba(0,0,0,.3);transition:transform .3s}
+#np input[type=range]{accent-color:var(--acc);padding:0;border:0;background:none;margin:8px 0 0}
+.grab{width:40px;height:5px;border-radius:3px;background:var(--mute);cursor:pointer}
+.ctl{display:flex;gap:36px;align-items:center;font-size:2rem}.ctl .ib{color:var(--ink);font-size:2.2rem}
+.err{color:var(--acc);margin:6px 0;min-height:1.2em}
+</style></head><body>
+<div id="app"></div>
+<div id="mini"></div>
+<div id="np"></div>
+<nav class="tabs" id="tabs"></nav>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script>
+// 1. Paste your values from Supabase > Project Settings > API
+var SUPABASE_URL="https://YOUR-PROJECT.supabase.co", SUPABASE_KEY="YOUR-ANON-KEY";
+var sb=supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+var $=function(i){return document.getElementById(i)};
+var S={user:null,tracks:[],liked:{},view:"home",q:"",queue:[],cur:null,msg:""};
+var au=new Audio();
+function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})}
+function mmss(s){s=Math.max(0,Math.floor(s||0));return Math.floor(s/60)+":"+String(s%60).padStart(2,"0")}
+function pub(b,p){return p?sb.storage.from(b).getPublicUrl(p).data.publicUrl:""}
+function art(t){
+  if(t.artwork_path)return"background-image:url('"+pub("art",t.artwork_path)+"')";
+  var h=0;for(var i=0;i<t.id.length;i++)h=(h*31+t.id.charCodeAt(i))%360;
+  return"background:linear-gradient(135deg,hsl("+h+",70%,60%),hsl("+(h+50)+",75%,38%))"}
+async function load(){
+  var r=await sb.from("tracks").select("*,profiles(name)").eq("status","live").order("created_at",{ascending:false});
+  S.tracks=r.data||[];
+  var l=await sb.from("likes").select("track_id");S.liked={};(l.data||[]).forEach(function(x){S.liked[x.track_id]=1});
+}
+function row(t,list){return'<div class="row'+(S.cur&&S.cur.id===t.id?" on":"")+'" data-play="'+t.id+'" data-list="'+list+'"><div class="cv" style="'+art(t)+'"></div><div class="m"><b>'+esc(t.title)+'</b><span class="sub">'+esc(t.profiles&&t.profiles.name)+'</span></div><button class="ib" data-like="'+t.id+'">'+(S.liked[t.id]?"♥":"♡")+'</button></div>'}
+function authView(){
+  return'<h1>Hum</h1><p class="sub">Sign in to listen and upload.</p><input id="em" type="email" placeholder="Email" autocomplete="email"><input id="pw" type="password" placeholder="Password (6+ characters)"><input id="nm" placeholder="Artist or display name (new accounts)"><div class="err">'+esc(S.msg)+'</div><button class="btn" id="si">Sign in</button><button class="btn alt" id="su">Create account</button>'}
+function view(){
+  if(!S.user){$("tabs").style.display="none";$("app").innerHTML=authView();return}
+  $("tabs").style.display="flex";
+  var T=S.tracks,h="";
+  if(S.view==="home"){
+    h="<h1>Listen Now</h1>";
+    if(!T.length)h+='<p class="sub">No songs yet. Upload the first one from the Upload tab.</p>';
+    else h+='<h2>New Releases</h2><div class="hs">'+T.map(function(t){return'<div class="card" data-play="'+t.id+'" data-list="all"><div class="cv" style="'+art(t)+'"></div><b>'+esc(t.title)+'</b><span>'+esc(t.profiles&&t.profiles.name)+'</span></div>'}).join("")+'</div><h2>All Songs</h2>'+T.map(function(t){return row(t,"all")}).join("")}
+  if(S.view==="search"){
+    var q=S.q.toLowerCase(),res=q?T.filter(function(t){return(t.title+" "+(t.profiles&&t.profiles.name)).toLowerCase().indexOf(q)>=0}):[];
+    h='<h1>Search</h1><input id="q" type="search" placeholder="Artists, Songs" value="'+esc(S.q)+'">'+(q&&!res.length?'<p class="sub">No results.</p>':res.map(function(t){return row(t,"search")}).join(""))}
+  if(S.view==="lib"){
+    var lk=T.filter(function(t){return S.liked[t.id]}),mine=T.filter(function(t){return t.artist_id===S.user.id});
+    h="<h1>Library</h1><h2>Liked Songs</h2>"+(lk.length?lk.map(function(t){return row(t,"liked")}).join(""):'<p class="sub">Tap ♡ on a song to add it here.</p>')+"<h2>My Uploads</h2>"+(mine.length?mine.map(function(t){return row(t,"mine")+'<button class="ib" data-del="'+t.id+'" style="font-size:.85rem">Delete "'+esc(t.title)+'"</button>'}).join(""):'<p class="sub">Nothing uploaded yet.</p>')+'<h2>Account</h2><button class="btn alt" id="so">Sign out</button>'}
+  if(S.view==="up")h='<h1>Upload</h1><p class="sub">Only upload music you own or have the rights to share.</p><input id="ut" placeholder="Song title"><p class="sub">Audio file (mp3, m4a)</p><input id="ua" type="file" accept="audio/*"><p class="sub">Cover art (optional)</p><input id="uc" type="file" accept="image/*"><label class="sub"><input id="ok" type="checkbox" style="width:auto;margin-right:8px">I own the rights to this track</label><div class="err" id="um">'+esc(S.msg)+'</div><button class="btn" id="ub">Upload</button>';
+  $("app").innerHTML=h;
+  $("tabs").innerHTML=[["home","▶","Listen Now"],["search","⌕","Search"],["lib","♫","Library"],["up","⬆","Upload"]].map(function(x){return'<button data-v="'+x[0]+'" class="'+(S.view===x[0]?"on":"")+'"><i>'+x[1]+"</i>"+x[2]+"</button>"}).join("");
+}
+function listFor(n){var T=S.tracks;return n==="liked"?T.filter(function(t){return S.liked[t.id]}):n==="mine"?T.filter(function(t){return t.artist_id===S.user.id}):n==="search"?T.filter(function(t){return(t.title+" "+(t.profiles&&t.profiles.name)).toLowerCase().indexOf(S.q.toLowerCase())>=0}):T}
+function play(t,list){
+  S.cur=t;if(list)S.queue=list;au.src=pub("audio",t.audio_path);au.play();
+  if("mediaSession"in navigator){
+    navigator.mediaSession.metadata=new MediaMetadata({title:t.title,artist:(t.profiles&&t.profiles.name)||"",artwork:t.artwork_path?[{src:pub("art",t.artwork_path)}]:[]});
+    navigator.mediaSession.setActionHandler("play",function(){au.play()});
+    navigator.mediaSession.setActionHandler("pause",function(){au.pause()});
+    navigator.mediaSession.setActionHandler("nexttrack",function(){step(1)});
+    navigator.mediaSession.setActionHandler("previoustrack",function(){step(-1)})}
+  mini();view()}
+function step(d){if(!S.cur||!S.queue.length)return;var i=S.queue.findIndex(function(t){return t.id===S.cur.id});play(S.queue[(i+d+S.queue.length)%S.queue.length])}
+function mini(){
+  var t=S.cur;if(!t){$("mini").style.display="none";return}
+  $("mini").style.display="flex";
+  $("mini").innerHTML='<div class="cv" style="'+art(t)+'"></div><div class="m" data-open="1"><b>'+esc(t.title)+'</b></div><button class="ib" style="color:var(--ink)" data-pp="1">'+(au.paused?"▶":"⏸")+'</button><button class="ib" style="color:var(--ink)" data-n="1">⏭</button>';
+  if($("np").style.display==="flex")np()}
+function np(){
+  var t=S.cur;if(!t)return;
+  $("np").innerHTML='<div class="grab" data-close="1"></div><div class="cv big" style="'+art(t)+';transform:scale('+(au.paused?.85:1)+')"></div><div style="width:100%;display:flex;align-items:center"><div style="flex:1"><b style="font-size:1.3rem">'+esc(t.title)+'</b><div class="sub" style="font-size:1.1rem">'+esc(t.profiles&&t.profiles.name)+'</div></div><button class="ib" data-like="'+t.id+'">'+(S.liked[t.id]?"♥":"♡")+'</button></div><div style="width:100%"><input type="range" id="sk" min="0" max="1000" value="0"><div class="sub" style="display:flex;justify-content:space-between;font-size:.8rem"><span id="e">0:00</span><span id="d">'+mmss(au.duration)+'</span></div></div><div class="ctl"><button class="ib" data-p="1">⏮</button><button class="ib" data-pp="1">'+(au.paused?"▶":"⏸")+'</button><button class="ib" data-n="1">⏭</button></div><button class="ib" style="font-size:.85rem;margin-top:18px" data-report="1">Report this track</button>'}
+au.onplay=au.onpause=function(){mini()};au.onended=function(){step(1)};
+au.ontimeupdate=function(){var e=$("e");if(e){e.textContent=mmss(au.currentTime);$("d").textContent=mmss(au.duration);var s=$("sk");if(s&&document.activeElement!==s)s.value=au.duration?au.currentTime/au.duration*1000:0}};
+document.addEventListener("input",function(e){if(e.target.id==="sk"&&au.duration)au.currentTime=au.duration*e.target.value/1000;if(e.target.id==="q"){S.q=e.target.value;var p=e.target.selectionStart;view();var q=$("q");q.focus();q.setSelectionRange(p,p)}});
+document.addEventListener("click",async function(e){
+  var g=function(a){return e.target.closest("["+a+"]")},x;
+  if(x=g("data-like")){e.stopPropagation();var id=x.dataset.like;
+    if(S.liked[id]){delete S.liked[id];await sb.from("likes").delete().match({user_id:S.user.id,track_id:id})}else{S.liked[id]=1;await sb.from("likes").insert({user_id:S.user.id,track_id:id})}
+    view();if($("np").style.display==="flex")np();return}
+  if(x=g("data-del")){if(confirm("Delete this track?")){await sb.from("tracks").delete().eq("id",x.dataset.del);await load();view()}return}
+  if(x=g("data-play")){var t=S.tracks.find(function(t){return t.id===x.dataset.play});play(t,listFor(x.dataset.list));return}
+  if(x=g("data-v")){S.view=x.dataset.v;S.msg="";view();return}
+  if(g("data-pp")){e.stopPropagation();au.paused?au.play():au.pause();return}
+  if(g("data-n")){e.stopPropagation();step(1);return}
+  if(g("data-p")){step(-1);return}
+  if(g("data-open")){$("np").style.display="flex";np();return}
+  if(g("data-close")){$("np").style.display="none";return}
+  if(g("data-report")){var r=prompt("What is wrong with this track?");if(r){await sb.from("reports").insert({track_id:S.cur.id,reporter_id:S.user.id,reason:r});alert("Thanks. We will review it.")}return}
+  var i=e.target.id;
+  if(i==="si"||i==="su"){
+    var em=$("em").value,pw=$("pw").value,nm=$("nm").value.trim();
+    if(i==="su"&&!nm){S.msg="Enter a display name.";view();return}
+    var r=i==="si"?await sb.auth.signInWithPassword({email:em,password:pw}):await sb.auth.signUp({email:em,password:pw,options:{data:{name:nm}}});
+    if(r.error){S.msg=r.error.message;view();return}
+    if(!r.data.session){S.msg="Check your email to confirm, then sign in.";view();return}
+    await start(r.data.session.user)}
+  if(i==="so"){await sb.auth.signOut();au.pause();S.user=null;S.cur=null;mini();view()}
+  if(i==="ub")upload()});
+async function upload(){
+  var m=$("um"),f=$("ua").files[0],c=$("uc").files[0],ti=$("ut").value.trim();
+  if(!ti||!f)return m.textContent="Add a title and an audio file.";
+  if(!$("ok").checked)return m.textContent="Confirm you own the rights.";
+  m.textContent="Uploading…";
+  var uid=S.user.id,k=crypto.randomUUID(),ext=function(n){return n.split(".").pop().toLowerCase()},ap=uid+"/"+k+"."+ext(f.name),cp=null;
+  var u=await sb.storage.from("audio").upload(ap,f);if(u.error)return m.textContent=u.error.message;
+  if(c){cp=uid+"/"+k+"."+ext(c.name);var u2=await sb.storage.from("art").upload(cp,c);if(u2.error)cp=null}
+  var dur=await new Promise(function(ok){var a=new Audio(URL.createObjectURL(f));a.onloadedmetadata=function(){ok(Math.round(a.duration))};a.onerror=function(){ok(null)}});
+  var r=await sb.from("tracks").insert({artist_id:uid,title:ti,audio_path:ap,artwork_path:cp,duration_s:dur});
+  if(r.error)return m.textContent=r.error.message;
+  await load();S.view="home";view()}
+async function start(u){
+  S.user=u;
+  var p=await sb.from("profiles").select("id").eq("id",u.id).maybeSingle();
+  if(!p.data)await sb.from("profiles").insert({id:u.id,name:(u.user_metadata&&u.user_metadata.name)||u.email.split("@")[0],is_artist:true});
+  await load();S.view="home";view()}
+(async function(){var s=await sb.auth.getSession();if(s.data.session)await start(s.data.session.user);else view()})();
+</script></body></html>
